@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>救急物品 在庫管理</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Emergency Supply Inventory</p>
+        <h1>救急物品 在庫管理</h1>
+      </div>
+      <div class="header-actions">
+        <button class="ghost-button" id="exportItemsBtn" type="button">物品CSV出力</button>
+        <button class="ghost-button" id="exportAllBtn" type="button">全データ保存</button>
+        <label class="file-button">
+          CSV取込
+          <input id="importFile" type="file" accept=".csv,text/csv" />
+        </label>
+      </div>
+    </header>
+
+    <main>
+      <nav class="tabs" aria-label="画面切替">
+        <button class="tab active" type="button" data-view="list">在庫一覧</button>
+        <button class="tab" type="button" data-view="master">物品登録</button>
+        <button class="tab" type="button" data-view="movement">受入・払出</button>
+        <button class="tab" type="button" data-view="history">履歴</button>
+      </nav>
+
+      <section class="view active" id="listView">
+        <div class="summary-grid" id="summaryGrid"></div>
+
+        <div class="toolbar">
+          <label>
+            物品名検索
+            <input id="searchName" type="search" placeholder="例：ガーゼ" />
+          </label>
+          <label>
+            カテゴリ
+            <select id="filterCategory">
+              <option value="">すべて</option>
+            </select>
+          </label>
+          <label>
+            保管場所
+            <select id="filterLocation">
+              <option value="">すべて</option>
+            </select>
+          </label>
+          <label>
+            状態
+            <select id="filterStatus">
+              <option value="">すべて</option>
+              <option value="不足">不足</option>
+              <option value="適正">適正</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>状態</th>
+                <th>物品名</th>
+                <th>カテゴリ</th>
+                <th>保管場所</th>
+                <th class="numeric">現在庫</th>
+                <th class="numeric">最低在庫</th>
+                <th>単位</th>
+                <th>メモ</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="itemsTable"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="view" id="masterView">
+        <form class="panel-form" id="itemForm">
+          <input id="itemId" type="hidden" />
+          <div class="form-grid">
+            <label>
+              物品名
+              <input id="itemName" required type="text" />
+            </label>
+            <label>
+              カテゴリ
+              <input id="itemCategory" required type="text" placeholder="例：処置材料" />
+            </label>
+            <label>
+              保管場所
+              <input id="itemLocation" required type="text" placeholder="例：救急カート上段" />
+            </label>
+            <label>
+              現在庫数
+              <input id="itemStock" min="0" required type="number" value="0" />
+            </label>
+            <label>
+              最低在庫数
+              <input id="itemMinimum" min="0" required type="number" value="0" />
+            </label>
+            <label>
+              単位
+              <input id="itemUnit" required type="text" placeholder="個、箱、本" />
+            </label>
+            <label class="wide">
+              メモ
+              <textarea id="itemMemo" rows="3"></textarea>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="primary-button" type="submit">登録する</button>
+            <button class="secondary-button" id="clearItemForm" type="button">入力をクリア</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="view" id="movementView">
+        <form class="panel-form" id="movementForm">
+          <div class="form-grid">
+            <label>
+              物品
+              <select id="movementItem" required></select>
+            </label>
+            <label>
+              区分
+              <select id="movementType" required>
+                <option value="受入">受入</option>
+                <option value="払出">払出</option>
+              </select>
+            </label>
+            <label>
+              数量
+              <input id="movementQty" min="1" required type="number" value="1" />
+            </label>
+            <label>
+              処理日
+              <input id="movementDate" required type="date" />
+            </label>
+            <label>
+              理由
+              <select id="movementReason" required>
+                <option value="使用">使用</option>
+                <option value="期限切れ">期限切れ</option>
+              </select>
+            </label>
+            <label>
+              担当者
+              <input id="movementStaff" required type="text" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="primary-button" type="submit">在庫を更新</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="view" id="historyView">
+        <div class="history-actions">
+          <button class="primary-button" id="exportHistoryBtn" type="button">履歴CSV出力</button>
+          <button class="danger-button" id="clearDataBtn" type="button">全データ削除</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>処理日</th>
+                <th>区分</th>
+                <th>物品名</th>
+                <th class="numeric">数量</th>
+                <th>理由</th>
+                <th>担当者</th>
+              </tr>
+            </thead>
+            <tbody id="historyTable"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
