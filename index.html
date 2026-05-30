@@ -33,6 +33,7 @@
 
       <section class="view active" id="listView">
         <div class="summary-grid" id="summaryGrid"></div>
+        <div class="expiry-panel" id="expiryPanel"></div>
 
         <div class="toolbar">
           <label>
@@ -66,6 +67,7 @@
                 <th class="numeric">現在庫</th>
                 <th class="numeric">最低在庫</th>
                 <th>単位</th>
+                <th>使用期限</th>
                 <th>メモ</th>
                 <th></th>
               </tr>
@@ -90,6 +92,10 @@
             <label>
               現在庫数
               <input id="itemStock" min="0" required type="number" value="0" />
+            </label>
+            <label>
+              初期在庫の使用期限
+              <input id="itemExpiry" type="month" />
             </label>
             <label>
               最低在庫数
@@ -134,11 +140,17 @@
               <input id="movementDate" required type="date" />
             </label>
             <label>
+              使用期限（任意）
+              <input id="movementExpiry" type="month" />
+              <small>払出時に空欄なら期限が近い在庫から減ります。</small>
+            </label>
+            <label>
               理由
               <select id="movementReason" required>
                 <option value="受入">受入</option>
                 <option value="使用">使用</option>
                 <option value="期限切れ">期限切れ</option>
+                <option value="点検">点検</option>
               </select>
             </label>
             <label>
@@ -165,6 +177,7 @@
                 <th>区分</th>
                 <th>物品名</th>
                 <th class="numeric">数量</th>
+                <th>使用期限</th>
                 <th>理由</th>
                 <th>担当者</th>
               </tr>
@@ -177,6 +190,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <script src="sample-data.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
