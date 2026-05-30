@@ -11,9 +11,6 @@ services:
         fromDatabase:
           name: emergency-inventory-db
           property: connectionString
-      - key: APP_PASSWORD
-        sync: false
-
 databases:
   - name: emergency-inventory-db
     plan: free

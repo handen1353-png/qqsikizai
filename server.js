@@ -7,7 +7,6 @@ const PORT = Number(process.env.PORT) || 8080;
 const ROOT = __dirname;
 const DATA_FILE = path.join(ROOT, "inventory-data.json");
 const DATABASE_URL = process.env.DATABASE_URL;
-const APP_PASSWORD = process.env.APP_PASSWORD;
 let pool;
 
 const MIME_TYPES = {
@@ -133,25 +132,6 @@ function receiveJson(request) {
   });
 }
 
-function isAuthorized(request) {
-  if (!APP_PASSWORD) return true;
-  const header = request.headers.authorization || "";
-  if (!header.startsWith("Basic ")) return false;
-  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-  const separator = decoded.indexOf(":");
-  return separator >= 0 &&
-    decoded.slice(0, separator) === "inventory" &&
-    decoded.slice(separator + 1) === APP_PASSWORD;
-}
-
-function requestLogin(response) {
-  response.writeHead(401, {
-    "WWW-Authenticate": 'Basic realm="Emergency Inventory"',
-    "Content-Type": "text/plain; charset=utf-8"
-  });
-  response.end("ログインが必要です");
-}
-
 function serveFile(request, response) {
   const requestUrl = new URL(request.url, `http://${request.headers.host}`);
   const pathname = decodeURIComponent(requestUrl.pathname);
@@ -179,11 +159,6 @@ function serveFile(request, response) {
 }
 
 const server = http.createServer(async (request, response) => {
-  if (!isAuthorized(request)) {
-    requestLogin(response);
-    return;
-  }
-
   if (request.url === "/api/state" && request.method === "GET") {
     sendJson(response, 200, await readState());
     return;
@@ -230,5 +205,4 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`このパソコン: http://localhost:${PORT}`);
   addresses.forEach((address) => console.log(`他の端末: ${address}`));
   if (DATABASE_URL) console.log("保存先: PostgreSQLデータベース");
-  if (APP_PASSWORD) console.log("アクセス保護: 有効");
 });

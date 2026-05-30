@@ -14,6 +14,7 @@
       </div>
       <div class="header-actions">
         <button class="ghost-button" id="exportItemsBtn" type="button">物品CSV出力</button>
+        <button class="ghost-button" id="exportRequestsBtn" type="button">物品要望書CSV</button>
         <button class="ghost-button" id="exportAllBtn" type="button">全データ保存</button>
         <label class="file-button">
           CSV取込
@@ -39,12 +40,6 @@
             <input id="searchName" type="search" placeholder="例：ガーゼ" />
           </label>
           <label>
-            カテゴリ
-            <select id="filterCategory">
-              <option value="">すべて</option>
-            </select>
-          </label>
-          <label>
             保管場所
             <select id="filterLocation">
               <option value="">すべて</option>
@@ -65,8 +60,8 @@
             <thead>
               <tr>
                 <th>状態</th>
+                <th>要望</th>
                 <th>物品名</th>
-                <th>カテゴリ</th>
                 <th>保管場所</th>
                 <th class="numeric">現在庫</th>
                 <th class="numeric">最低在庫</th>
@@ -87,10 +82,6 @@
             <label>
               物品名
               <input id="itemName" required type="text" />
-            </label>
-            <label>
-              カテゴリ
-              <input id="itemCategory" required type="text" placeholder="例：処置材料" />
             </label>
             <label>
               保管場所
@@ -145,6 +136,7 @@
             <label>
               理由
               <select id="movementReason" required>
+                <option value="受入">受入</option>
                 <option value="使用">使用</option>
                 <option value="期限切れ">期限切れ</option>
               </select>

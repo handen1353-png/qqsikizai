@@ -168,7 +168,13 @@ button,
 .toolbar {
   display: grid;
   gap: 12px;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1fr 1fr;
+}
+
+.request-check {
+  height: 18px;
+  min-height: 18px;
+  width: 18px;
 }
 
 .form-grid {

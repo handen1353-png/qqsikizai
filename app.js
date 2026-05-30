@@ -4,7 +4,6 @@ const sampleItems = [
   {
     id: crypto.randomUUID(),
     name: "滅菌ガーゼ",
-    category: "処置材料",
     location: "救急カート 上段",
     stock: 24,
     minimum: 20,
@@ -14,7 +13,6 @@ const sampleItems = [
   {
     id: crypto.randomUUID(),
     name: "生理食塩水 500mL",
-    category: "輸液",
     location: "処置室 棚A",
     stock: 8,
     minimum: 10,
@@ -24,7 +22,6 @@ const sampleItems = [
   {
     id: crypto.randomUUID(),
     name: "ニトリル手袋 M",
-    category: "感染対策",
     location: "救急カート 下段",
     stock: 3,
     minimum: 4,
@@ -42,14 +39,12 @@ const el = {
   views: document.querySelectorAll(".view"),
   summaryGrid: document.getElementById("summaryGrid"),
   searchName: document.getElementById("searchName"),
-  filterCategory: document.getElementById("filterCategory"),
   filterLocation: document.getElementById("filterLocation"),
   filterStatus: document.getElementById("filterStatus"),
   itemsTable: document.getElementById("itemsTable"),
   itemForm: document.getElementById("itemForm"),
   itemId: document.getElementById("itemId"),
   itemName: document.getElementById("itemName"),
-  itemCategory: document.getElementById("itemCategory"),
   itemLocation: document.getElementById("itemLocation"),
   itemStock: document.getElementById("itemStock"),
   itemMinimum: document.getElementById("itemMinimum"),
@@ -65,6 +60,7 @@ const el = {
   movementStaff: document.getElementById("movementStaff"),
   historyTable: document.getElementById("historyTable"),
   exportItemsBtn: document.getElementById("exportItemsBtn"),
+  exportRequestsBtn: document.getElementById("exportRequestsBtn"),
   exportHistoryBtn: document.getElementById("exportHistoryBtn"),
   exportAllBtn: document.getElementById("exportAllBtn"),
   importFile: document.getElementById("importFile"),
@@ -188,19 +184,17 @@ function fillSelect(select, values, keepValue = "") {
 }
 
 function renderFilters() {
-  fillSelect(el.filterCategory, uniqueValues("category"), el.filterCategory.value);
   fillSelect(el.filterLocation, uniqueValues("location"), el.filterLocation.value);
 }
 
 function renderSummary() {
   const shortage = state.items.filter((item) => Number(item.stock) <= Number(item.minimum)).length;
-  const categories = uniqueValues("category").length;
   const locations = uniqueValues("location").length;
   const historyCount = state.history.length;
   const cards = [
     ["登録物品", state.items.length],
     ["不足", shortage],
-    ["カテゴリ", categories],
+    ["保管場所", locations],
     ["履歴", historyCount]
   ];
 
@@ -211,14 +205,12 @@ function renderSummary() {
 
 function getFilteredItems() {
   const q = el.searchName.value.trim().toLowerCase();
-  const category = el.filterCategory.value;
   const location = el.filterLocation.value;
   const status = el.filterStatus.value;
   return state.items.filter((item) => {
     const isLow = Number(item.stock) <= Number(item.minimum);
     return (
       (!q || item.name.toLowerCase().includes(q)) &&
-      (!category || item.category === category) &&
       (!location || item.location === location) &&
       (!status || (status === "不足" ? isLow : !isLow))
     );
@@ -238,8 +230,8 @@ function renderItems() {
       return `
         <tr>
           <td><span class="badge ${low ? "low" : "ok"}">${low ? "不足" : "適正"}</span></td>
+          <td><input class="request-check" type="checkbox" data-action="request" data-id="${item.id}" aria-label="${escapeHtml(item.name)}を要望書に追加" ${item.requested ? "checked" : ""}></td>
           <td>${escapeHtml(item.name)}</td>
-          <td>${escapeHtml(item.category)}</td>
           <td>${escapeHtml(item.location)}</td>
           <td class="numeric">${Number(item.stock).toLocaleString()}</td>
           <td class="numeric">${Number(item.minimum).toLocaleString()}</td>
@@ -316,7 +308,6 @@ function editItem(id) {
   if (!item) return;
   el.itemId.value = item.id;
   el.itemName.value = item.name;
-  el.itemCategory.value = item.category;
   el.itemLocation.value = item.location;
   el.itemStock.value = item.stock;
   el.itemMinimum.value = item.minimum;
@@ -333,18 +324,19 @@ function selectMovementItem(id) {
 
 async function upsertItem(event) {
   event.preventDefault();
+  const existingItem = state.items.find((target) => target.id === el.itemId.value);
   const item = {
     id: el.itemId.value || crypto.randomUUID(),
     name: el.itemName.value.trim(),
-    category: el.itemCategory.value.trim(),
     location: el.itemLocation.value.trim(),
     stock: Number(el.itemStock.value),
     minimum: Number(el.itemMinimum.value),
     unit: el.itemUnit.value.trim(),
-    memo: el.itemMemo.value.trim()
+    memo: el.itemMemo.value.trim(),
+    requested: existingItem?.requested || false
   };
 
-  if (!item.name || !item.category || !item.location || !item.unit) {
+  if (!item.name || !item.location || !item.unit) {
     showToast("必須項目を入力してください");
     return;
   }
@@ -420,8 +412,8 @@ function downloadCsv(filename, headers, rows) {
 function exportItems() {
   downloadCsv(
     `救急物品_物品マスタ_${today()}.csv`,
-    ["物品名", "カテゴリ", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ"],
-    state.items.map((item) => [item.name, item.category, item.location, item.stock, item.minimum, item.unit, item.memo])
+    ["物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "要望"],
+    state.items.map((item) => [item.name, item.location, item.stock, item.minimum, item.unit, item.memo, item.requested ? "はい" : ""])
   );
 }
 
@@ -433,10 +425,24 @@ function exportHistory() {
   );
 }
 
+function exportRequests() {
+  const requests = state.items.filter((item) => item.requested);
+  if (!requests.length) {
+    showToast("要望にチェックされた物品がありません");
+    return;
+  }
+
+  downloadCsv(
+    `救急物品_物品要望書_${today()}.csv`,
+    ["物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ"],
+    requests.map((item) => [item.name, item.location, item.stock, item.minimum, item.unit, item.memo])
+  );
+}
+
 function exportAll() {
   const rows = [
-    ["種別", "物品ID", "物品名", "カテゴリ", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "処理日", "区分", "数量", "理由", "担当者"],
-    ...state.items.map((item) => ["物品", item.id, item.name, item.category, item.location, item.stock, item.minimum, item.unit, item.memo, "", "", "", "", ""]),
+    ["種別", "物品ID", "物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "要望", "処理日", "区分", "数量", "理由", "担当者"],
+    ...state.items.map((item) => ["物品", item.id, item.name, item.location, item.stock, item.minimum, item.unit, item.memo, item.requested ? "はい" : "", "", "", "", "", ""]),
     ...state.history.map((row) => ["履歴", row.itemId, row.itemName, "", "", "", "", "", "", row.date, row.type, row.quantity, row.reason, row.staff])
   ];
   const [headers, ...data] = rows;
@@ -504,12 +510,12 @@ function importItemRows(rows, headerIndex) {
   state.items = rows.map((row) => ({
     id: crypto.randomUUID(),
     name: value(row, headerIndex, "物品名"),
-    category: value(row, headerIndex, "カテゴリ"),
     location: value(row, headerIndex, "保管場所"),
     stock: Number(value(row, headerIndex, "現在庫数")) || 0,
     minimum: Number(value(row, headerIndex, "最低在庫数")) || 0,
     unit: value(row, headerIndex, "単位"),
-    memo: value(row, headerIndex, "メモ")
+    memo: value(row, headerIndex, "メモ"),
+    requested: value(row, headerIndex, "要望") === "はい"
   }));
   state.history = [];
 }
@@ -527,12 +533,12 @@ function importAllRows(rows, headerIndex) {
       items.push({
         id,
         name: value(row, headerIndex, "物品名"),
-        category: value(row, headerIndex, "カテゴリ"),
         location: value(row, headerIndex, "保管場所"),
         stock: Number(value(row, headerIndex, "現在庫数")) || 0,
         minimum: Number(value(row, headerIndex, "最低在庫数")) || 0,
         unit: value(row, headerIndex, "単位"),
-        memo: value(row, headerIndex, "メモ")
+        memo: value(row, headerIndex, "メモ"),
+        requested: value(row, headerIndex, "要望") === "はい"
       });
     }
   });
@@ -571,22 +577,30 @@ function escapeHtml(value) {
 el.tabs.forEach((tab) => tab.addEventListener("click", () => switchView(tab.dataset.view)));
 ["input", "change"].forEach((eventName) => {
   el.searchName.addEventListener(eventName, renderItems);
-  el.filterCategory.addEventListener(eventName, renderItems);
   el.filterLocation.addEventListener(eventName, renderItems);
   el.filterStatus.addEventListener(eventName, renderItems);
 });
 
-el.itemsTable.addEventListener("click", (event) => {
+el.itemsTable.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
-  if (!button) return;
-  if (button.dataset.action === "edit") editItem(button.dataset.id);
-  if (button.dataset.action === "move") selectMovementItem(button.dataset.id);
+  if (button) {
+    if (button.dataset.action === "edit") editItem(button.dataset.id);
+    if (button.dataset.action === "move") selectMovementItem(button.dataset.id);
+  }
+  const checkbox = event.target.closest('input[data-action="request"]');
+  if (checkbox) {
+    const item = state.items.find((target) => target.id === checkbox.dataset.id);
+    if (!item) return;
+    item.requested = checkbox.checked;
+    if (!(await saveState())) renderAll();
+  }
 });
 
 el.itemForm.addEventListener("submit", upsertItem);
 el.clearItemForm.addEventListener("click", resetItemForm);
 el.movementForm.addEventListener("submit", submitMovement);
 el.exportItemsBtn.addEventListener("click", exportItems);
+el.exportRequestsBtn.addEventListener("click", exportRequests);
 el.exportHistoryBtn.addEventListener("click", exportHistory);
 el.exportAllBtn.addEventListener("click", exportAll);
 el.importFile.addEventListener("change", (event) => {
