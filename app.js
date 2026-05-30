@@ -35,6 +35,7 @@ const sampleItems = [
 
 let state = { items: [], history: [] };
 let serverMode = false;
+let revision = 0;
 
 const el = {
   tabs: document.querySelectorAll(".tab"),
@@ -78,6 +79,7 @@ async function loadState() {
       if (response.ok) {
         serverMode = true;
         const parsed = await response.json();
+        revision = Number(parsed.revision) || 0;
         return {
           items: Array.isArray(parsed.items) ? parsed.items : [],
           history: Array.isArray(parsed.history) ? parsed.history : []
@@ -110,9 +112,24 @@ async function saveState() {
       const response = await fetch("/api/state", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(state)
+        body: JSON.stringify({ ...state, revision })
       });
-      if (response.ok) return;
+      if (response.ok) {
+        const result = await response.json();
+        revision = Number(result.revision) || revision;
+        return true;
+      }
+      if (response.status === 409) {
+        const latest = await response.json();
+        state = {
+          items: Array.isArray(latest.items) ? latest.items : [],
+          history: Array.isArray(latest.history) ? latest.history : []
+        };
+        revision = Number(latest.revision) || 0;
+        renderAll();
+        showToast("別の端末で更新がありました。最新状態を表示しました");
+        return false;
+      }
     } catch {
       serverMode = false;
       showToast("サーバー保存に失敗したため、この端末に保存しました");
@@ -120,6 +137,27 @@ async function saveState() {
   }
 
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return true;
+}
+
+async function refreshStateFromServer() {
+  if (!serverMode) return;
+  try {
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (!response.ok) return;
+    const latest = await response.json();
+    const latestRevision = Number(latest.revision) || 0;
+    if (latestRevision <= revision) return;
+    state = {
+      items: Array.isArray(latest.items) ? latest.items : [],
+      history: Array.isArray(latest.history) ? latest.history : []
+    };
+    revision = latestRevision;
+    renderAll();
+    showToast("最新の在庫情報を同期しました");
+  } catch {
+    // Keep the current screen usable during a temporary network interruption.
+  }
 }
 
 function showToast(message) {
@@ -320,7 +358,7 @@ async function upsertItem(event) {
     showToast("物品を登録しました");
   }
 
-  await saveState();
+  if (!(await saveState())) return;
   resetItemForm();
   renderAll();
   switchView("list");
@@ -355,7 +393,7 @@ async function submitMovement(event) {
     createdAt: new Date().toISOString()
   });
 
-  await saveState();
+  if (!(await saveState())) return;
   el.movementForm.reset();
   el.movementDate.value = today();
   renderAll();
@@ -453,7 +491,7 @@ async function importCsv(file) {
     return;
   }
 
-  await saveState();
+  if (!(await saveState())) return;
   renderAll();
   showToast("CSVを取り込みました");
 }
@@ -559,7 +597,7 @@ el.importFile.addEventListener("change", (event) => {
 el.clearDataBtn.addEventListener("click", async () => {
   if (!confirm("登録データと履歴をすべて削除します。よろしいですか？")) return;
   state = { items: [], history: [] };
-  await saveState();
+  if (!(await saveState())) return;
   renderAll();
   showToast("全データを削除しました");
 });
@@ -568,6 +606,10 @@ async function init() {
   state = await loadState();
   el.movementDate.value = today();
   renderAll();
+  if (serverMode) {
+    window.setInterval(refreshStateFromServer, 3000);
+    window.addEventListener("focus", refreshStateFromServer);
+  }
 }
 
 init();
