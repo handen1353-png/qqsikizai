@@ -1,36 +1,21 @@
 const STORAGE_KEY = "emergencyInventoryApp.v1";
 
-const sampleItems = [
-  {
-    id: crypto.randomUUID(),
-    name: "滅菌ガーゼ",
-    location: "救急カート 上段",
-    stock: 24,
-    minimum: 20,
-    unit: "枚",
-    memo: "5枚入りパック"
-  },
-  {
-    id: crypto.randomUUID(),
-    name: "生理食塩水 500mL",
-    location: "処置室 棚A",
-    stock: 8,
-    minimum: 10,
-    unit: "本",
-    memo: "期限確認対象"
-  },
-  {
-    id: crypto.randomUUID(),
-    name: "ニトリル手袋 M",
-    location: "救急カート 下段",
-    stock: 3,
-    minimum: 4,
-    unit: "箱",
-    memo: ""
-  }
-];
+const sampleItems = (globalThis.EMERGENCY_SAMPLE_ITEMS || []).map((item) => ({
+  ...item,
+  id: crypto.randomUUID(),
+  requested: false
+}));
 
-let state = { items: [], history: [] };
+function mergeSampleItems(items) {
+  const merged = [...items];
+  const existingNames = new Set(items.map((item) => item.name));
+  sampleItems.forEach((item) => {
+    if (!existingNames.has(item.name)) merged.push({ ...item });
+  });
+  return merged;
+}
+
+let state = { items: [], history: [], sampleSeedVersion: 2 };
 let serverMode = false;
 let revision = 0;
 
@@ -38,6 +23,7 @@ const el = {
   tabs: document.querySelectorAll(".tab"),
   views: document.querySelectorAll(".view"),
   summaryGrid: document.getElementById("summaryGrid"),
+  expiryPanel: document.getElementById("expiryPanel"),
   searchName: document.getElementById("searchName"),
   filterLocation: document.getElementById("filterLocation"),
   filterStatus: document.getElementById("filterStatus"),
@@ -47,6 +33,7 @@ const el = {
   itemName: document.getElementById("itemName"),
   itemLocation: document.getElementById("itemLocation"),
   itemStock: document.getElementById("itemStock"),
+  itemExpiry: document.getElementById("itemExpiry"),
   itemMinimum: document.getElementById("itemMinimum"),
   itemUnit: document.getElementById("itemUnit"),
   itemMemo: document.getElementById("itemMemo"),
@@ -56,6 +43,7 @@ const el = {
   movementType: document.getElementById("movementType"),
   movementQty: document.getElementById("movementQty"),
   movementDate: document.getElementById("movementDate"),
+  movementExpiry: document.getElementById("movementExpiry"),
   movementReason: document.getElementById("movementReason"),
   movementStaff: document.getElementById("movementStaff"),
   historyTable: document.getElementById("historyTable"),
@@ -78,7 +66,8 @@ async function loadState() {
         revision = Number(parsed.revision) || 0;
         return {
           items: Array.isArray(parsed.items) ? parsed.items : [],
-          history: Array.isArray(parsed.history) ? parsed.history : []
+          history: Array.isArray(parsed.history) ? parsed.history : [],
+          sampleSeedVersion: 2
         };
       }
     } catch {
@@ -88,17 +77,19 @@ async function loadState() {
 
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) {
-    return { items: sampleItems, history: [] };
+    return { items: sampleItems, history: [], sampleSeedVersion: 2 };
   }
 
   try {
     const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed.items) ? parsed.items : [];
     return {
-      items: Array.isArray(parsed.items) ? parsed.items : [],
-      history: Array.isArray(parsed.history) ? parsed.history : []
+      items: parsed.sampleSeedVersion === 2 ? items : mergeSampleItems(items),
+      history: Array.isArray(parsed.history) ? parsed.history : [],
+      sampleSeedVersion: 2
     };
   } catch {
-    return { items: sampleItems, history: [] };
+    return { items: sampleItems, history: [], sampleSeedVersion: 2 };
   }
 }
 
@@ -119,7 +110,8 @@ async function saveState() {
         const latest = await response.json();
         state = {
           items: Array.isArray(latest.items) ? latest.items : [],
-          history: Array.isArray(latest.history) ? latest.history : []
+          history: Array.isArray(latest.history) ? latest.history : [],
+          sampleSeedVersion: 2
         };
         revision = Number(latest.revision) || 0;
         renderAll();
@@ -146,7 +138,8 @@ async function refreshStateFromServer() {
     if (latestRevision <= revision) return;
     state = {
       items: Array.isArray(latest.items) ? latest.items : [],
-      history: Array.isArray(latest.history) ? latest.history : []
+      history: Array.isArray(latest.history) ? latest.history : [],
+      sampleSeedVersion: 2
     };
     revision = latestRevision;
     renderAll();
@@ -164,6 +157,76 @@ function showToast(message) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeInventory() {
+  state.items.forEach((item) => {
+    if (!Array.isArray(item.lots)) {
+      item.lots = Number(item.stock) > 0 ? [{ quantity: Number(item.stock), expiry: "" }] : [];
+    }
+    item.lots = item.lots
+      .map((lot) => ({ quantity: Number(lot.quantity) || 0, expiry: lot.expiry || "" }))
+      .filter((lot) => lot.quantity > 0);
+    item.stock = item.lots.reduce((total, lot) => total + lot.quantity, 0);
+  });
+}
+
+function addLot(item, quantity, expiry = "") {
+  const existing = item.lots.find((lot) => lot.expiry === expiry);
+  if (existing) existing.quantity += quantity;
+  else item.lots.push({ quantity, expiry });
+  item.stock = item.lots.reduce((total, lot) => total + lot.quantity, 0);
+}
+
+function consumeLots(item, quantity, selectedExpiry = "") {
+  let remaining = quantity;
+  const consumed = [];
+  const targetLots = selectedExpiry
+    ? item.lots.filter((lot) => lot.expiry === selectedExpiry)
+    : item.lots.sort((a, b) => (a.expiry || "9999-99").localeCompare(b.expiry || "9999-99"));
+  const available = targetLots.reduce((total, lot) => total + lot.quantity, 0);
+  if (available < quantity) return "";
+  targetLots
+    .forEach((lot) => {
+      const used = Math.min(lot.quantity, remaining);
+      lot.quantity -= used;
+      remaining -= used;
+      if (used > 0) consumed.push(`${formatExpiry(lot.expiry)}: ${used}`);
+    });
+  item.lots = item.lots.filter((lot) => lot.quantity > 0);
+  item.stock = item.lots.reduce((total, lot) => total + lot.quantity, 0);
+  return consumed.join(" / ");
+}
+
+function formatExpiry(expiry) {
+  return expiry ? expiry.replace("-", "/") : "期限未登録";
+}
+
+function formatHistoryExpiry(expiry) {
+  return expiry?.includes(":") ? expiry : formatExpiry(expiry);
+}
+
+function formatLots(item) {
+  if (!item.lots.length) return "-";
+  return item.lots
+    .slice()
+    .sort((a, b) => (a.expiry || "9999-99").localeCompare(b.expiry || "9999-99"))
+    .map((lot) => `${formatExpiry(lot.expiry)}: ${lot.quantity}${item.unit}`)
+    .join(" / ");
+}
+
+function getExpiryAlerts() {
+  const now = new Date();
+  const limit = new Date(now.getFullYear(), now.getMonth() + 4, 0);
+  return state.items.flatMap((item) =>
+    item.lots
+      .filter((lot) => {
+        if (!lot.expiry) return false;
+        const [year, month] = lot.expiry.split("-").map(Number);
+        return new Date(year, month, 0) <= limit;
+      })
+      .map((lot) => ({ item, lot }))
+  );
 }
 
 function switchView(viewName) {
@@ -203,6 +266,16 @@ function renderSummary() {
     .join("");
 }
 
+function renderExpiryAlerts() {
+  const alerts = getExpiryAlerts();
+  el.expiryPanel.classList.toggle("show", alerts.length > 0);
+  el.expiryPanel.innerHTML = alerts.length
+    ? `<strong>使用期限のお知らせ（3か月以内）</strong><ul>${alerts
+        .map(({ item, lot }) => `<li>${escapeHtml(item.name)} ${lot.quantity}${escapeHtml(item.unit)} ${escapeHtml(formatExpiry(lot.expiry))}</li>`)
+        .join("")}</ul>`
+    : "";
+}
+
 function getFilteredItems() {
   const q = el.searchName.value.trim().toLowerCase();
   const location = el.filterLocation.value;
@@ -220,7 +293,7 @@ function getFilteredItems() {
 function renderItems() {
   const items = getFilteredItems();
   if (!items.length) {
-    el.itemsTable.innerHTML = `<tr><td class="empty" colspan="9">表示できる物品がありません</td></tr>`;
+    el.itemsTable.innerHTML = `<tr><td class="empty" colspan="10">表示できる物品がありません</td></tr>`;
     return;
   }
 
@@ -236,6 +309,7 @@ function renderItems() {
           <td class="numeric">${Number(item.stock).toLocaleString()}</td>
           <td class="numeric">${Number(item.minimum).toLocaleString()}</td>
           <td>${escapeHtml(item.unit)}</td>
+          <td>${escapeHtml(formatLots(item))}</td>
           <td>${escapeHtml(item.memo || "")}</td>
           <td>
             <div class="row-actions">
@@ -267,7 +341,7 @@ function renderMovementItems(selectedId = "") {
 function renderHistory() {
   const rows = state.history.slice().sort((a, b) => `${b.date}${b.createdAt}`.localeCompare(`${a.date}${a.createdAt}`));
   if (!rows.length) {
-    el.historyTable.innerHTML = `<tr><td class="empty" colspan="6">履歴はまだありません</td></tr>`;
+    el.historyTable.innerHTML = `<tr><td class="empty" colspan="7">履歴はまだありません</td></tr>`;
     return;
   }
 
@@ -279,6 +353,7 @@ function renderHistory() {
           <td><span class="badge ${row.type === "払出" ? "low" : "ok"}">${escapeHtml(row.type)}</span></td>
           <td>${escapeHtml(row.itemName)}</td>
           <td class="numeric">${Number(row.quantity).toLocaleString()}</td>
+          <td>${escapeHtml(formatHistoryExpiry(row.expiry))}</td>
           <td>${escapeHtml(row.reason)}</td>
           <td>${escapeHtml(row.staff)}</td>
         </tr>
@@ -288,8 +363,10 @@ function renderHistory() {
 }
 
 function renderAll() {
+  normalizeInventory();
   renderFilters();
   renderSummary();
+  renderExpiryAlerts();
   renderItems();
   renderMovementItems(el.movementItem.value);
   renderHistory();
@@ -299,6 +376,7 @@ function resetItemForm() {
   el.itemForm.reset();
   el.itemId.value = "";
   el.itemStock.value = 0;
+  el.itemExpiry.value = "";
   el.itemMinimum.value = 0;
   el.itemForm.querySelector(".primary-button").textContent = "登録する";
 }
@@ -310,6 +388,7 @@ function editItem(id) {
   el.itemName.value = item.name;
   el.itemLocation.value = item.location;
   el.itemStock.value = item.stock;
+  el.itemExpiry.value = "";
   el.itemMinimum.value = item.minimum;
   el.itemUnit.value = item.unit;
   el.itemMemo.value = item.memo || "";
@@ -333,7 +412,13 @@ async function upsertItem(event) {
     minimum: Number(el.itemMinimum.value),
     unit: el.itemUnit.value.trim(),
     memo: el.itemMemo.value.trim(),
-    requested: existingItem?.requested || false
+    requested: existingItem?.requested || false,
+    lots:
+      existingItem && Number(existingItem.stock) === Number(el.itemStock.value)
+        ? existingItem.lots
+        : Number(el.itemStock.value) > 0
+          ? [{ quantity: Number(el.itemStock.value), expiry: el.itemExpiry.value }]
+          : []
   };
 
   if (!item.name || !item.location || !item.unit) {
@@ -365,20 +450,29 @@ async function submitMovement(event) {
   }
 
   const qty = Number(el.movementQty.value);
-  const direction = el.movementType.value === "受入" ? 1 : -1;
-  const nextStock = Number(item.stock) + direction * qty;
+  const receiving = el.movementType.value === "受入";
+  const nextStock = Number(item.stock) + (receiving ? qty : -qty);
   if (nextStock < 0) {
     showToast("在庫数がマイナスになります");
     return;
   }
 
-  item.stock = nextStock;
+  let handledExpiry = el.movementExpiry.value;
+  if (receiving) addLot(item, qty, handledExpiry);
+  else {
+    handledExpiry = consumeLots(item, qty, el.movementExpiry.value);
+    if (!handledExpiry) {
+      showToast("指定した使用期限の在庫が不足しています");
+      return;
+    }
+  }
   state.history.push({
     id: crypto.randomUUID(),
     itemId: item.id,
     itemName: item.name,
     type: el.movementType.value,
     quantity: qty,
+    expiry: handledExpiry,
     date: el.movementDate.value,
     reason: el.movementReason.value.trim(),
     staff: el.movementStaff.value.trim(),
@@ -412,16 +506,16 @@ function downloadCsv(filename, headers, rows) {
 function exportItems() {
   downloadCsv(
     `救急物品_物品マスタ_${today()}.csv`,
-    ["物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "要望"],
-    state.items.map((item) => [item.name, item.location, item.stock, item.minimum, item.unit, item.memo, item.requested ? "はい" : ""])
+    ["物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "要望", "期限別在庫"],
+    state.items.map((item) => [item.name, item.location, item.stock, item.minimum, item.unit, item.memo, item.requested ? "はい" : "", JSON.stringify(item.lots)])
   );
 }
 
 function exportHistory() {
   downloadCsv(
     `救急物品_受払履歴_${today()}.csv`,
-    ["処理日", "区分", "物品名", "数量", "理由", "担当者"],
-    state.history.map((row) => [row.date, row.type, row.itemName, row.quantity, row.reason, row.staff])
+    ["処理日", "区分", "物品名", "数量", "使用期限", "理由", "担当者"],
+    state.history.map((row) => [row.date, row.type, row.itemName, row.quantity, row.expiry, row.reason, row.staff])
   );
 }
 
@@ -441,9 +535,9 @@ function exportRequests() {
 
 function exportAll() {
   const rows = [
-    ["種別", "物品ID", "物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "要望", "処理日", "区分", "数量", "理由", "担当者"],
-    ...state.items.map((item) => ["物品", item.id, item.name, item.location, item.stock, item.minimum, item.unit, item.memo, item.requested ? "はい" : "", "", "", "", "", ""]),
-    ...state.history.map((row) => ["履歴", row.itemId, row.itemName, "", "", "", "", "", "", row.date, row.type, row.quantity, row.reason, row.staff])
+    ["種別", "物品ID", "物品名", "保管場所", "現在庫数", "最低在庫数", "単位", "メモ", "要望", "期限別在庫", "処理日", "区分", "数量", "使用期限", "理由", "担当者"],
+    ...state.items.map((item) => ["物品", item.id, item.name, item.location, item.stock, item.minimum, item.unit, item.memo, item.requested ? "はい" : "", JSON.stringify(item.lots), "", "", "", "", "", ""]),
+    ...state.history.map((row) => ["履歴", row.itemId, row.itemName, "", "", "", "", "", "", "", row.date, row.type, row.quantity, row.expiry, row.reason, row.staff])
   ];
   const [headers, ...data] = rows;
   downloadCsv(`救急物品_全データ_${today()}.csv`, headers, data);
@@ -506,17 +600,31 @@ function value(row, headerIndex, key) {
   return row[headerIndex[key]] ?? "";
 }
 
+function parseLots(row, headerIndex, stock) {
+  try {
+    const lots = JSON.parse(value(row, headerIndex, "期限別在庫"));
+    if (Array.isArray(lots)) return lots;
+  } catch {
+    // Older CSV files do not include lot details.
+  }
+  return stock > 0 ? [{ quantity: stock, expiry: "" }] : [];
+}
+
 function importItemRows(rows, headerIndex) {
-  state.items = rows.map((row) => ({
-    id: crypto.randomUUID(),
-    name: value(row, headerIndex, "物品名"),
-    location: value(row, headerIndex, "保管場所"),
-    stock: Number(value(row, headerIndex, "現在庫数")) || 0,
-    minimum: Number(value(row, headerIndex, "最低在庫数")) || 0,
-    unit: value(row, headerIndex, "単位"),
-    memo: value(row, headerIndex, "メモ"),
-    requested: value(row, headerIndex, "要望") === "はい"
-  }));
+  state.items = rows.map((row) => {
+    const stock = Number(value(row, headerIndex, "現在庫数")) || 0;
+    return {
+      id: crypto.randomUUID(),
+      name: value(row, headerIndex, "物品名"),
+      location: value(row, headerIndex, "保管場所"),
+      stock,
+      minimum: Number(value(row, headerIndex, "最低在庫数")) || 0,
+      unit: value(row, headerIndex, "単位"),
+      memo: value(row, headerIndex, "メモ"),
+      requested: value(row, headerIndex, "要望") === "はい",
+      lots: parseLots(row, headerIndex, stock)
+    };
+  });
   state.history = [];
 }
 
@@ -530,15 +638,17 @@ function importAllRows(rows, headerIndex) {
     if (type === "物品") {
       const id = value(row, headerIndex, "物品ID") || crypto.randomUUID();
       itemIdMap.set(id, id);
+      const stock = Number(value(row, headerIndex, "現在庫数")) || 0;
       items.push({
         id,
         name: value(row, headerIndex, "物品名"),
         location: value(row, headerIndex, "保管場所"),
-        stock: Number(value(row, headerIndex, "現在庫数")) || 0,
+        stock,
         minimum: Number(value(row, headerIndex, "最低在庫数")) || 0,
         unit: value(row, headerIndex, "単位"),
         memo: value(row, headerIndex, "メモ"),
-        requested: value(row, headerIndex, "要望") === "はい"
+        requested: value(row, headerIndex, "要望") === "はい",
+        lots: parseLots(row, headerIndex, stock)
       });
     }
   });
@@ -553,6 +663,7 @@ function importAllRows(rows, headerIndex) {
         itemName: value(row, headerIndex, "物品名"),
         type: value(row, headerIndex, "区分"),
         quantity: Number(value(row, headerIndex, "数量")) || 0,
+        expiry: value(row, headerIndex, "使用期限"),
         date: value(row, headerIndex, "処理日"),
         reason: value(row, headerIndex, "理由"),
         staff: value(row, headerIndex, "担当者"),
@@ -610,7 +721,7 @@ el.importFile.addEventListener("change", (event) => {
 });
 el.clearDataBtn.addEventListener("click", async () => {
   if (!confirm("登録データと履歴をすべて削除します。よろしいですか？")) return;
-  state = { items: [], history: [] };
+  state = { items: [], history: [], sampleSeedVersion: 2 };
   if (!(await saveState())) return;
   renderAll();
   showToast("全データを削除しました");

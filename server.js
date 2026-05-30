@@ -2,6 +2,8 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const crypto = require("node:crypto");
+const sampleItems = require("./sample-data.js");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ROOT = __dirname;
@@ -18,7 +20,28 @@ const MIME_TYPES = {
 };
 
 function defaultState() {
-  return { items: [], history: [], revision: 0 };
+  return {
+    items: sampleItems.map((item) => ({
+      ...item,
+      id: crypto.randomUUID(),
+      requested: false
+    })),
+    history: [],
+    revision: 0,
+    sampleSeedVersion: 2
+  };
+}
+
+function mergeSampleItems(state) {
+  if (state.sampleSeedVersion === 2) return state;
+  const items = Array.isArray(state.items) ? [...state.items] : [];
+  const existingNames = new Set(items.map((item) => item.name));
+  sampleItems.forEach((item) => {
+    if (!existingNames.has(item.name)) {
+      items.push({ ...item, id: crypto.randomUUID(), requested: false });
+    }
+  });
+  return { ...state, items, sampleSeedVersion: 2 };
 }
 
 function getPool() {
@@ -60,16 +83,24 @@ async function readState() {
       "SELECT data, revision FROM inventory_state WHERE id = 1"
     );
     const row = result.rows[0];
+    const seeded = mergeSampleItems(row.data);
+    if (seeded !== row.data) {
+      await database.query(
+        "UPDATE inventory_state SET data = $1, updated_at = NOW() WHERE id = 1",
+        [seeded]
+      );
+    }
     return {
-      items: Array.isArray(row.data.items) ? row.data.items : [],
-      history: Array.isArray(row.data.history) ? row.data.history : [],
+      items: Array.isArray(seeded.items) ? seeded.items : [],
+      history: Array.isArray(seeded.history) ? seeded.history : [],
       revision: Number(row.revision) || 0
     };
   }
 
   if (!fs.existsSync(DATA_FILE)) return defaultState();
   try {
-    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    const data = mergeSampleItems(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
     return {
       items: Array.isArray(data.items) ? data.items : [],
       history: Array.isArray(data.history) ? data.history : [],
@@ -84,7 +115,8 @@ async function writeState(state, revision, expectedRevision) {
   const safeState = {
     items: Array.isArray(state.items) ? state.items : [],
     history: Array.isArray(state.history) ? state.history : [],
-    revision
+    revision,
+    sampleSeedVersion: 2
   };
 
   const database = getPool();

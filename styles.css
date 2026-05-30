@@ -156,6 +156,30 @@ button,
   margin-top: 5px;
 }
 
+.expiry-panel {
+  background: #fff8e5;
+  border: 1px solid #efd28a;
+  border-radius: 8px;
+  color: #654500;
+  display: none;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.expiry-panel.show {
+  display: block;
+}
+
+.expiry-panel strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.expiry-panel ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .toolbar,
 .panel-form {
   background: var(--panel);
@@ -189,6 +213,12 @@ label {
   font-size: 13px;
   font-weight: 700;
   gap: 7px;
+}
+
+small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 input,
